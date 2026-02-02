@@ -1,0 +1,40 @@
+# Django
+*.log
+*.pot
+*.pyc
+__pycache__/
+db.sqlite3
+db.sqlite3-journal
+media/
+
+# Virtual Environment
+venv/
+.env
+.venv
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Coverage
+.coverage
+htmlcov/
+
+# Project specific
+*.tar.gz
+*.zip
+config/settings.py.backup
+config/settings.py.backup2

@@ -1,3 +1,9 @@
+import os
+from dotenv import load_dotenv
+
+# Загружаем переменные окружения из .env файла
+load_dotenv()
+
 """
 Django settings for config project.
 """
@@ -25,6 +31,7 @@ INSTALLED_APPS = [
     
     'rest_framework',
     'drf_yasg',
+    'drf_spectacular',
     'rest_framework_simplejwt',
     'django_filters',
     
@@ -97,6 +104,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # DRF настройки
 REST_FRAMEWORK = {
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',
@@ -141,4 +149,18 @@ SIMPLE_JWT = {
     'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
     'SLIDING_TOKEN_LIFETIME': timedelta(minutes=5),
     'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
+}
+
+# Настройки drf-spectacular
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Educational Platform API',
+    'DESCRIPTION': 'API для образовательной платформы с оплатой курсов через Stripe',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'SWAGGER_UI_SETTINGS': {
+        'deepLinking': True,
+        'persistAuthorization': True,
+        'displayRequestDuration': True,
+    },
+    'COMPONENT_SPLIT_REQUEST': True,
 }

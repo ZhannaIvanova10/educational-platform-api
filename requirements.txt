@@ -1,28 +1,20 @@
-# Основные зависимости Django
+# Основные зависимости
 Django==6.0.1
 djangorestframework==3.16.1
 djangorestframework-simplejwt==5.5.1
 
-# Дополнительные Django пакеты
-django-cors-headers==4.9.0
-django-filter==25.2
-drf-yasg==1.21.14
-
-# Базы данных
-psycopg2-binary==2.9.11
-django-redis==5.3.0
-redis==5.0.1
-
-# Обработка изображений
-Pillow==12.1.0
-
-# Работа с окружением
+# Документация
+drf-spectacular==0.26.5
 python-dotenv==1.0.0
 
-# HTTP и запросы
-requests==2.31.0
-PyJWT==2.10.1
+# Дополнительные
+django-cors-headers==4.9.0
+django-filter==25.2
+stripe==5.5.0
 
-# Утилиты
-pytz==2025.3
-tzdata==2025.3
+# База данных (опционально)
+psycopg2-binary==2.9.11
+
+# Кэширование (опционально)
+django-redis==5.3.0
+redis==5.0.1

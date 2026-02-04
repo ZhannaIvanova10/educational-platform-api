@@ -3,15 +3,19 @@
 *.pot
 *.pyc
 __pycache__/
+local_settings.py
 db.sqlite3
 db.sqlite3-journal
 media/
+staticfiles/
 
-# Virtual Environment
+# Virtual environment
 venv/
 .env
-.venv
-env/
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
 # IDE
 .vscode/
@@ -23,18 +27,22 @@ env/
 .DS_Store
 Thumbs.db
 
-# Python
-*.pyc
-*.pyo
-*.pyd
-.Python
-
-# Coverage
+# Testing
 .coverage
 htmlcov/
+.pytest_cache/
 
-# Project specific
-*.tar.gz
-*.zip
-config/settings.py.backup
-config/settings.py.backup2
+# Database migrations (кроме init)
+*/migrations/*.py
+!*/migrations/__init__.py
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+# Redis
+dump.rdb
+
+# Наши тестовые файлы
+test_*.py
+*.py.backup
+check_env.py

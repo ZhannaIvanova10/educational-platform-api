@@ -1,216 +1,155 @@
-from rest_framework import viewsets, status, filters
-from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
+from datetime import timedelta
+from django.utils import timezone
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.views import APIView
-from django.shortcuts import get_object_or_404
-from django.contrib.auth import get_user_model
-from django.http import HttpResponse
+from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import OrderingFilter, SearchFilter
 
 from .models import Course, Lesson, Subscription
-from .serializers import CourseSerializer, LessonSerializer, SubscriptionSerializer
-from .paginators import LessonPagination, CoursePagination
-from .permissions import IsModerator, IsOwner, IsOwnerOrModerator, IsNotModerator
+from .serializers import (
+    CourseSerializer,
+    LessonSerializer,
+    CourseWithPriceSerializer,
+)
+from .permissions import IsOwnerOrStaff
 
-User = get_user_model()
-
-
-# Простая главная страница
-def home(request):
-    html = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Materials API</title>
-        <style>
-            body { font-family: Arial, sans-serif; margin: 40px; }
-            h1 { color: #333; }
-            .endpoint { background: #f5f5f5; padding: 10px; margin: 10px 0; border-radius: 5px; }
-            code { background: #e0e0e0; padding: 2px 5px; border-radius: 3px; }
-        </style>
-    </head>
-    <body>
-        <h1>📚 Materials API</h1>
-        <p>Добро пожаловать в API для управления курсами и уроками!</p>
-
-        <h2>🔗 Доступные endpoints:</h2>
-        <div class="endpoint">
-            <strong>GET</strong> <code>/api/v1/materials/courses/</code> - Список курсов
-        </div>
-        <div class="endpoint">
-            <strong>GET</strong> <code>/api/v1/materials/lessons/</code> - Список уроков
-        </div>
-        <div class="endpoint">
-            <strong>GET/POST</strong> <code>/api/v1/materials/subscription/</code> - Управление подписками
-        </div>
-        <div class="endpoint">
-            <strong>POST</strong> <code>/api/v1/users/register/</code> - Регистрация
-        </div>
-        <div class="endpoint">
-            <strong>POST</strong> <code>/api/v1/users/token/</code> - Получение JWT токена
-        </div>
-        <div class="endpoint">
-            <strong>POST</strong> <code>/api/v1/users/token/refresh/</code> - Обновление JWT токена
-        </div>
-        <div class="endpoint">
-            <strong>GET</strong> <code>/admin/</code> - Админ-панель
-        </div>
-
-        <h2>🔐 Права доступа:</h2>
-        <ul>
-            <li><strong>Администраторы:</strong> Полный доступ ко всему</li>
-            <li><strong>Модераторы:</strong> Могут просматривать и редактировать любые курсы/уроки, но не могут создавать/удалять</li>
-            <li><strong>Обычные пользователи:</strong> Только свои курсы/уроки</li>
-        </ul>
-        <hr>
-        <p><small>Проект выполнен в рамках домашнего задания</small></p>
-    </body>
-    </html>
-    """
-    return HttpResponse(html)
+# Пробуем импортировать Celery задачи
+try:
+    from materials.tasks import send_course_update_email
+    CELERY_AVAILABLE = True
+    print("✅ Celery задачи доступны")
+except ImportError as e:
+    CELERY_AVAILABLE = False
+    print(f"⚠️  Celery задачи недоступны: {e}")
 
 
 class CourseViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet для работы с курсами с поддержкой подписок и уведомлений
+    """
     queryset = Course.objects.all()
     serializer_class = CourseSerializer
-    pagination_class = CoursePagination
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    ordering_fields = ['created_at', 'title']
-
-    def get_permissions(self):
-        """Разграничение прав доступа - ИСПРАВЛЕННЫЙ ВАРИАНТ"""
-        if self.action == 'create':
-            # Создавать могут только администраторы и не-модераторы
-            permission_classes = [IsAuthenticated, IsNotModerator]
-        elif self.action in ['update', 'partial_update']:
-            # Обновлять могут владельцы, модераторы и администраторы
-            permission_classes = [IsAuthenticated, IsOwnerOrModerator | IsAdminUser]
-        elif self.action == 'destroy':
-            # Удалять могут только владельцы и администраторы (но не модераторы)
-            permission_classes = [IsAuthenticated, IsOwner | IsAdminUser]
-        else:
-            # Просматривать могут все аутентифицированные
-            permission_classes = [IsAuthenticated]
-
-        return [permission() for permission in permission_classes]
-
-    def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
-
-    def get_queryset(self):
-        """Фильтрация queryset в зависимости от прав пользователя"""
-        user = self.request.user
-
-        if not user.is_authenticated:
-            return Course.objects.none()
-
-        # Администраторы видят все
-        if user.is_superuser:
-            return Course.objects.all()
-
-        # Модераторы видят все
-        if user.groups.filter(name='moderators').exists():
-            return Course.objects.all()
-
-        # Обычные пользователи видят только свои курсы
-        return Course.objects.filter(owner=user)
-
-    def retrieve(self, request, *args, **kwargs):
-        """Добавляем флаг подписки в детальную информацию о курсе"""
-        instance = self.get_object()
-        serializer = self.get_serializer(instance)
-
-        data = serializer.data
-        # Добавляем флаг подписки
-        if request.user.is_authenticated:
-            is_subscribed = Subscription.objects.filter(
-                user=request.user,
-                course=instance
-            ).exists()
-            data['is_subscribed'] = is_subscribed
-        else:
-            data['is_subscribed'] = False
-
-        return Response(data)
-
-
-class LessonViewSet(viewsets.ModelViewSet):
-    queryset = Lesson.objects.all()
-    serializer_class = LessonSerializer
-    pagination_class = LessonPagination
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    ordering_fields = ['created_at', 'title']
-
-    def get_permissions(self):
-        """Разграничение прав доступа - ИСПРАВЛЕННЫЙ ВАРИАНТ"""
-        if self.action == 'create':
-            # Создавать могут только администраторы и не-модераторы
-            permission_classes = [IsAuthenticated, IsNotModerator]
-        elif self.action in ['update', 'partial_update']:
-            # Обновлять могут владельцы, модераторы и администраторы
-            permission_classes = [IsAuthenticated, IsOwnerOrModerator | IsAdminUser]
-        elif self.action == 'destroy':
-            # Удалять могут только владельцы и администраторы (но не модераторы)
-            permission_classes = [IsAuthenticated, IsOwner | IsAdminUser]
-        else:
-            # Просматривать могут все аутентифицированные
-            permission_classes = [IsAuthenticated]
-
-        return [permission() for permission in permission_classes]
-
-    def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
-
-    def get_queryset(self):
-        """Фильтрация queryset в зависимости от прав пользователя"""
-        user = self.request.user
-
-        if not user.is_authenticated:
-            return Lesson.objects.none()
-
-        # Администраторы видят все
-        if user.is_superuser:
-            return Lesson.objects.all()
-
-        # Модераторы видят все
-        if user.groups.filter(name='moderators').exists():
-            return Lesson.objects.all()
-
-        # Обычные пользователи видят только свои уроки
-        return Lesson.objects.filter(owner=user)
-
-
-class SubscriptionAPIView(APIView):
+    filter_backends = [DjangoFilterBackend, OrderingFilter, SearchFilter]
+    filterset_fields = ['is_published']
+    ordering_fields = ['title', 'price', 'created_at']
+    search_fields = ['title', 'description']
     permission_classes = [IsAuthenticated]
+    def get_serializer_class(self):
+        """
+        Выбираем сериализатор в зависимости от действия
+        """
+        if self.action == 'list' or self.action == 'retrieve':
+            return CourseWithPriceSerializer
+        return CourseSerializer
 
-    def post(self, request, *args, **kwargs):
+    def perform_create(self, serializer):
+        serializer.save(owner=self.request.user)
+
+    def perform_update(self, serializer):
+        """
+        Переопределяем метод обновления для отправки уведомлений
+        """
+        instance = serializer.save()
+
+        # Дополнительное задание: проверяем, обновлялся ли курс за последние 4 часа
+        four_hours_ago = timezone.now() - timedelta(hours=4)
+
+        if CELERY_AVAILABLE and instance.updated_at < four_hours_ago:
+            # Отправляем уведомление асинхронно
+            update_message = f"Курс '{instance.title}' был обновлен. Проверьте новые материалы!"
+
+            try:
+                # Запускаем Celery задачу асинхронно
+                send_course_update_email.delay(
+                    course_id=instance.id,
+                    update_message=update_message
+                )
+                print(f"✅ Задача на отправку уведомлений для курса '{instance.title}' отправлена в Celery")
+            except Exception as e:
+                print(f"❌ Ошибка при отправке задачи в Celery: {e}")
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def subscribe(self, request, pk=None):
+        """
+        Подписка на курс
+        """
+        course = self.get_object()
         user = request.user
-        course_id = request.data.get('course_id')
 
-        if not course_id:
-            return Response(
-                {"error": "course_id is required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        course_item = get_object_or_404(Course, id=course_id)
-
-        subscription = Subscription.objects.filter(
+        subscription, created = Subscription.objects.get_or_create(
             user=user,
-            course=course_item
+            course=course,
+            defaults={'is_active': True}
         )
 
-        if subscription.exists():
-            subscription.delete()
-            message = 'подписка удалена'
-        else:
-            Subscription.objects.create(user=user, course=course_item)
-            message = 'подписка добавлена'
+        if not created:
+            subscription.is_active = not subscription.is_active
+            subscription.save()
 
-        return Response({"message": message})
+        message = 'подписка оформлена' if subscription.is_active else 'подписка отменена'
 
-    def get(self, request, *args, **kwargs):
-        user = request.user
-        subscriptions = Subscription.objects.filter(user=user)
-        serializer = SubscriptionSerializer(subscriptions, many=True)
+        return Response({
+            'message': f'{message} на курс "{course.title}"',
+            'subscription_id': subscription.id,
+            'is_active': subscription.is_active
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
+    def my_subscriptions(self, request):
+        """
+        Список курсов, на которые подписан текущий пользователь
+        """
+        subscriptions = Subscription.objects.filter(
+            user=request.user,
+            is_active=True
+        ).select_related('course')
+
+        courses = [sub.course for sub in subscriptions]
+        serializer = self.get_serializer(courses, many=True)
+
         return Response(serializer.data)
+class LessonViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet для работы с уроками с поддержкой уведомлений
+    """
+    queryset = Lesson.objects.all()
+    serializer_class = LessonSerializer
+    filter_backends = [DjangoFilterBackend, OrderingFilter, SearchFilter]
+    filterset_fields = ['course']
+    ordering_fields = ['title', 'order']
+    search_fields = ['title', 'description']
+    permission_classes = [IsAuthenticated]
+
+    def perform_create(self, serializer):
+        serializer.save(owner=self.request.user)
+
+    def perform_update(self, serializer):
+        """
+        Переопределяем метод обновления урока для отправки уведомлений
+        """
+        instance = serializer.save()
+        course = instance.course
+
+        if not CELERY_AVAILABLE:
+            return
+
+        # Проверяем, обновлялся ли курс за последние 4 часа
+        four_hours_ago = timezone.now() - timedelta(hours=4)
+
+        if course.updated_at < four_hours_ago:
+            # Обновляем время обновления курса
+            course.updated_at = timezone.now()
+            course.save()
+            # Отправляем уведомление асинхронно
+            update_message = f"В курсе '{course.title}' был обновлен урок: '{instance.title}'"
+
+            try:
+                # Запускаем Celery задачу асинхронно
+                send_course_update_email.delay(
+                    course_id=course.id,
+                    update_message=update_message
+                )
+                print(f"✅ Задача на отправку уведомлений для курса '{course.title}' отправлена в Celery")
+            except Exception as e:
+                print(f"❌ Ошибка при отправке задачи в Celery: {e}")
